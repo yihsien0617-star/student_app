@@ -2,15 +2,23 @@ import streamlit as st
 import json
 import os
 
-# --- 1. 讀取 JSON 題庫資料 ---
+# --- 1. 讀取 JSON 題庫資料 (絕對路徑升級版) ---
 @st.cache_data
-def load_exam_data(file_path):
-    if os.path.exists(file_path):
-        with open(file_path, 'r', encoding='utf-8') as f:
+def load_exam_data(file_name):
+    # 自動取得目前這支 Python 檔案所在的資料夾路徑
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    # 將資料夾路徑與檔名組合，產生絕對路徑
+    full_path = os.path.join(current_dir, file_name)
+    
+    if os.path.exists(full_path):
+        with open(full_path, 'r', encoding='utf-8') as f:
             return json.load(f)
-    return []
+    else:
+        # 如果還是找不到，直接把「系統實際上在找的路徑」印在網頁上給您看！
+        st.error(f"⚠️ 找不到檔案！系統實際尋找的路徑為：\n`{full_path}`")
+        return []
 
-# 請將這裡的檔名替換成您實際轉檔出來的 JSON 檔名
+# 請確保這裡的檔名與您產出的檔案完全一致 (注意大小寫)
 EXAM_FILE = '臨床血清免疫學解析.json' 
 exam_data = load_exam_data(EXAM_FILE)
 
