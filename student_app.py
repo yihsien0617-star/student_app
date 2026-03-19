@@ -11,126 +11,184 @@ def load_exam_data(file_path):
     return []
 
 # 請將這裡的檔名替換成您實際轉檔出來的 JSON 檔名
-EXAM_FILE = 'immunology_exam.json' 
+EXAM_FILE = '臨床血清免疫學解析.json' 
 exam_data = load_exam_data(EXAM_FILE)
 
-# --- 2. 初始化 Session State (紀錄測驗進度) ---
+# --- 2. 初始化系統狀態 (阿摩模式必備) ---
 if 'logged_in' not in st.session_state:
     st.session_state['logged_in'] = False
-if 'current_q_index' not in st.session_state:
-    st.session_state['current_q_index'] = 0
-if 'score' not in st.session_state:
-    st.session_state['score'] = 0
-if 'show_explanation' not in st.session_state:
-    st.session_state['show_explanation'] = False
-if 'selected_option' not in st.session_state:
-    st.session_state['selected_option'] = None
+if 'current_index' not in st.session_state:
+    st.session_state['current_index'] = 0
+if 'user_answers' not in st.session_state:
+    st.session_state['user_answers'] = {} # 記錄每題學生的答案 {題號索引: 'A'}
+if 'marked_questions' not in st.session_state:
+    st.session_state['marked_questions'] = set() # 記錄被標記的題目索引
 
 # --- 3. 網頁介面設計 ---
-st.set_page_config(page_title="中華醫大醫檢系 | 國考線上測驗", page_icon="🧬", layout="centered")
+st.set_page_config(page_title="醫檢師國考 | 臨床血清免疫學", page_icon="🧬", layout="wide")
 
 # --- 登入畫面 ---
 if not st.session_state['logged_in']:
-    st.title("🧬 臨床血清免疫學線上題庫")
-    st.info("請輸入課堂專屬密碼以進入測驗系統。")
+    st.title("🧬 臨床血清免疫學國考題庫系統")
+    st.info("系統採用阿摩/ExamWise刷題架構，請輸入課堂專屬密碼進入。")
     password = st.text_input("輸入密碼：", type="password")
     
-    if st.button("登入"):
-        if password == "hwai2026": # 預設密碼，您可以隨時更改
+    if st.button("登入系統"):
+        if password == "hwai2026": 
             st.session_state['logged_in'] = True
             st.rerun()
         else:
             st.error("密碼錯誤，請重新確認！")
 
-# --- 測驗畫面 ---
+# --- 測驗主畫面 (阿摩/ExamWise 風格) ---
 else:
     if not exam_data:
         st.error("找不到題庫資料，請確認 JSON 檔案是否存在。")
     else:
-        # 側邊欄：顯示進度與選單
+        # ==========================================
+        # 左側邊欄：類似阿摩的「題號導覽網格」與進度
+        # ==========================================
         with st.sidebar:
-            st.header("📊 學習儀表板")
-            st.progress((st.session_state['current_q_index']) / len(exam_data))
-            st.write(f"進度：第 **{st.session_state['current_q_index'] + 1}** 題 / 共 {len(exam_data)} 題")
-            st.write(f"目前答對：**{st.session_state['score']}** 題")
+            st.subheader("📊 測驗導覽")
+            
+            # 計算答對題數
+            correct_count = sum(1 for idx, ans in st.session_state['user_answers'].items() if ans == exam_data[idx]['answer'])
+            total_answered = len(st.session_state['user_answers'])
+            
+            # 進度條與計分板
+            st.progress(total_answered / len(exam_data) if len(exam_data) > 0 else 0)
+            col_a, col_b = st.columns(2)
+            col_a.metric("已作答", f"{total_answered} / {len(exam_data)}")
+            col_b.metric("答對題數", f"{correct_count}")
             
             st.divider()
-            if st.button("🚪 登出系統"):
+            st.write("📍 **題號快速跳轉** (🟢答對 🔴答錯 ⚪未答 🚩標記)")
+            
+            # 建立題號網格 (每列 5 題)
+            cols = st.columns(5)
+            for i in range(len(exam_data)):
+                # 決定按鈕顯示的符號
+                status = "⚪"
+                if i in st.session_state['user_answers']:
+                    if st.session_state['user_answers'][i] == exam_data[i]['answer']:
+                        status = "🟢"
+                    else:
+                        status = "🔴"
+                
+                flag = "🚩" if i in st.session_state['marked_questions'] else ""
+                btn_label = f"{status}{i+1}{flag}"
+                
+                # 點擊題號跳轉
+                with cols[i % 5]:
+                    if st.button(btn_label, key=f"nav_{i}", help=f"第 {i+1} 題"):
+                        st.session_state['current_index'] = i
+                        st.rerun()
+            
+            st.divider()
+            if st.button("🚪 登出系統", use_container_width=True):
                 for key in list(st.session_state.keys()):
                     del st.session_state[key]
                 st.rerun()
 
-        # 主畫面：顯示題目
-        current_q = exam_data[st.session_state['current_q_index']]
+        # ==========================================
+        # 右側主畫面：題目呈現與作答區
+        # ==========================================
+        current_idx = st.session_state['current_index']
+        q = exam_data[current_idx]
         
-        st.subheader(f"📝 第 {current_q.get('question_number', st.session_state['current_q_index'] + 1)} 題")
-        st.markdown(f"### {current_q['question_text']}")
+        # 頂部工具列 (題號與標記功能)
+        head_col1, head_col2 = st.columns([4, 1])
+        with head_col1:
+            st.subheader(f"📝 第 {q.get('question_number', current_idx + 1)} 題")
+        with head_col2:
+            # 標記功能 (類似阿摩的標籤)
+            is_marked = current_idx in st.session_state['marked_questions']
+            mark_btn_text = "🚩 取消標記" if is_marked else "⛳ 標記此題"
+            if st.button(mark_btn_text, use_container_width=True):
+                if is_marked:
+                    st.session_state['marked_questions'].remove(current_idx)
+                else:
+                    st.session_state['marked_questions'].add(current_idx)
+                st.rerun()
+        
+        # 題目內文
+        st.markdown(f"#### {q['question_text']}")
+        st.write("") # 空行增加閱讀舒適度
         
         # 整理選項
-        options_list = []
-        option_keys = []
-        for key, text in current_q['options'].items():
-            options_list.append(f"({key}) {text}")
-            option_keys.append(key)
-            
-        # 讓學生選擇答案
-        selected = st.radio("請選擇您的答案：", options_list, index=None, key=f"radio_{st.session_state['current_q_index']}")
+        options_list = [f"({k}) {v}" for k, v in q['options'].items()]
+        option_keys = list(q['options'].keys())
         
-        # 提交按鈕與回饋邏輯
-        if not st.session_state['show_explanation']:
-            if st.button("✅ 送出答案"):
-                if selected:
-                    # 擷取學生選的字母 (A, B, C, D)
-                    student_ans = selected[1] 
-                    st.session_state['selected_option'] = student_ans
-                    st.session_state['show_explanation'] = True
-                    
-                    if student_ans == current_q['answer']:
-                        st.session_state['score'] += 1
-                        st.toast("🎉 答對了！基礎觀念很扎實！")
-                    else:
-                        st.toast("❌ 答錯了，請看下方老師解析釐清觀念！")
-                    st.rerun()
-                else:
-                    st.warning("請先選擇一個答案！")
+        # 檢查這題是否已經作答過
+        has_answered = current_idx in st.session_state['user_answers']
+        previous_answer = st.session_state['user_answers'].get(current_idx)
         
-        # 顯示解析與下一題按鈕
-        else:
-            student_ans = st.session_state['selected_option']
-            correct_ans = current_q['answer']
-            
-            if student_ans == correct_ans:
-                st.success(f"**您的答案：{student_ans} | 正確答案：{correct_ans} ➔ 答對！**")
-            else:
-                st.error(f"**您的答案：{student_ans} | 正確答案：{correct_ans} ➔ 答錯！**")
-            
-            # 展開老師撰寫的精華解析
-            with st.expander("💡 點開看老師獨家解析", expanded=True):
-                if current_q.get('explanation'):
-                    st.info(current_q['explanation'])
+        # 如果已作答，找出當時選的 index 以便預設選取
+        default_idx = None
+        if has_answered and previous_answer in option_keys:
+            default_idx = option_keys.index(previous_answer)
+
+        # 作答區 (使用 Radio 按鈕)
+        selected_option = st.radio(
+            "請選擇答案：", 
+            options_list, 
+            index=default_idx,
+            key=f"radio_q_{current_idx}",
+            disabled=has_answered # 阿摩模式：答過就鎖定，直接看解析
+        )
+        
+        # 提交答案邏輯
+        if not has_answered:
+            if st.button("✅ 提交答案", type="primary"):
+                if selected_option:
+                    # 擷取選項字母 (A, B, C, D)
+                    ans_letter = selected_option[1]
+                    st.session_state['user_answers'][current_idx] = ans_letter
+                    st.rerun() # 重新載入以顯示解析
                 else:
-                    st.write("本題暫無詳細解析。")
-                    
-                # 顯示難度等標籤
-                if current_q.get('tags'):
-                    st.write("---")
-                    cols = st.columns(len(current_q['tags']))
-                    for idx, (k, v) in enumerate(current_q['tags'].items()):
-                        cols[idx].metric(label=k, value=v)
+                    st.warning("請先選擇一個選項再提交！")
+        
+        # ==========================================
+        # 解析呈現區 (作答後才會顯示)
+        # ==========================================
+        if has_answered:
+            st.divider()
+            user_ans = st.session_state['user_answers'][current_idx]
+            correct_ans = q['answer']
             
-            # 換題邏輯
-            if st.session_state['current_q_index'] < len(exam_data) - 1:
-                if st.button("➡️ 下一題", type="primary"):
-                    st.session_state['current_q_index'] += 1
-                    st.session_state['show_explanation'] = False
-                    st.session_state['selected_option'] = None
-                    st.rerun()
+            # 對錯判定提示
+            if user_ans == correct_ans:
+                st.success(f"🎉 **答對了！** 您的答案：{user_ans}")
             else:
-                st.balloons()
-                st.success(f"🏆 恭喜您完成本測驗！總共答對 {st.session_state['score']} 題。")
-                if st.button("🔄 重新測驗"):
-                    st.session_state['current_q_index'] = 0
-                    st.session_state['score'] = 0
-                    st.session_state['show_explanation'] = False
-                    st.session_state['selected_option'] = None
+                st.error(f"❌ **答錯了！** 您的答案：{user_ans} ，正確答案應為：{correct_ans}")
+            
+            # 老師獨家解析區塊
+            st.markdown("### 💡 老師解析")
+            if q.get('explanation'):
+                st.info(q['explanation'])
+            else:
+                st.write("本題暫無詳細解析。")
+                
+            # 顯示難度與再現性標籤
+            if q.get('tags'):
+                tag_cols = st.columns(len(q['tags']))
+                for idx, (k, v) in enumerate(q['tags'].items()):
+                    tag_cols[idx].metric(label=k, value=v)
+
+        # ==========================================
+        # 底部導航按鈕 (上一題 / 下一題)
+        # ==========================================
+        st.divider()
+        nav_col1, nav_col2, nav_col3 = st.columns([1, 2, 1])
+        with nav_col1:
+            if current_idx > 0:
+                if st.button("⬅️ 上一題", use_container_width=True):
+                    st.session_state['current_index'] -= 1
+                    st.rerun()
+        with nav_col3:
+            if current_idx < len(exam_data) - 1:
+                # 如果已經作答，按鈕變明顯一點引導往下
+                btn_type = "primary" if has_answered else "secondary"
+                if st.button("下一題 ➡️", use_container_width=True, type=btn_type):
+                    st.session_state['current_index'] += 1
                     st.rerun()
